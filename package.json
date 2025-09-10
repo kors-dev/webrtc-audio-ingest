@@ -1,0 +1,14 @@
+{
+  "name": "mediasoup-audio-ingest",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "mediasoup": "^3.14.11",
+    "uuid": "^9.0.1"
+  }
+}

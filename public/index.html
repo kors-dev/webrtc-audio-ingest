@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="utf-8" />
+    <title>mediasoup audio ingest (demo)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 700px; margin: 40px auto; }
+      button { padding: 10px 16px; margin-right: 8px; }
+      #log { white-space: pre-wrap; background: #f6f6f6; padding: 10px; border-radius: 6px; }
+    </style>
+  </head>
+  <body>
+    <h1>mediasoup audio ingest</h1>
+    <p>Ця сторінка бере мікрофон і шле його на локальний сервер.</p>
+    <div>
+      <button id="start">Start streaming</button>
+      <button id="stop">Stop</button>
+    </div>
+    <p id="status">Idle</p>
+    <div id="log"></div>
+
+    <script type="module">
+      // mediasoup-client як ES-модуль із CDN
+      import * as mediasoupClient from 'https://esm.sh/mediasoup-client';
+
+      const state = {
+        device: null,
+        sendTransport: null,
+        producer: null,
+        peerId: crypto.randomUUID(),
+      };
+
+      const log = (m) => {
+        console.log(m);
+        const el = document.getElementById('log');
+        el.textContent += `\n${new Date().toLocaleTimeString()}  ${m}`;
+      };
+
+      async function start() {
+        try {
+          document.getElementById('status').textContent = 'Starting…';
+
+          // 1) Забираємо RTP Capabilities роутера
+          const rtpCaps = await (await fetch('/rtp-capabilities')).json();
+
+          // 2) Ініціалізуємо mediasoup Device
+          const device = new mediasoupClient.Device();
+          await device.load({ routerRtpCapabilities: rtpCaps });
+          state.device = device;
+
+          // 3) Просимо сервер створити WebRTC транспорт для відправки
+          const t = await (await fetch('/create-transport', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ peerId: state.peerId }),
+          })).json();
+
+          const sendTransport = device.createSendTransport({
+            id: t.id,
+            iceParameters: t.iceParameters,
+            iceCandidates: t.iceCandidates,
+            dtlsParameters: t.dtlsParameters,
+          });
+
+          sendTransport.on('connect', async ({ dtlsParameters }, callback, errback) => {
+            try {
+              await fetch('/connect-transport', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ transportId: t.id, dtlsParameters }),
+              });
+              callback();
+            } catch (e) { errback(e); }
+          });
+
+          sendTransport.on('produce', async ({ kind, rtpParameters }, callback, errback) => {
+            try {
+              const r = await (await fetch('/produce', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ transportId: t.id, kind, rtpParameters, peerId: state.peerId }),
+              })).json();
+              callback({ id: r.id });
+            } catch (e) { errback(e); }
+          });
+
+          // 4) Беремо мікрофон
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          const track = stream.getAudioTracks()[0];
+
+          // 5) Відправляємо аудіо як Producer
+          const producer = await sendTransport.produce({
+            track,
+            codecOptions: { opusStereo: 1, opusDtx: 1 },
+          });
+
+          state.sendTransport = sendTransport;
+          state.producer = producer;
+
+          document.getElementById('status').textContent = 'Streaming microphone…';
+          log(`Producer started (id=${producer.id})`);
+        } catch (e) {
+          console.error(e);
+          document.getElementById('status').textContent = 'Error (див. консоль)';
+          log(`Error: ${e.message || e}`);
+        }
+      }
+
+      function stop() {
+        try {
+          state.producer?.close();
+          state.sendTransport?.close();
+          state.producer = null;
+          state.sendTransport = null;
+          document.getElementById('status').textContent = 'Stopped';
+          log('Stopped');
+        } catch {}
+      }
+
+      document.getElementById('start').addEventListener('click', start);
+      document.getElementById('stop').addEventListener('click', stop);
+    </script>
+  </body>
+</html>

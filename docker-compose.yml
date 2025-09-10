@@ -1,0 +1,33 @@
+services:
+  mediasoup:
+    build: .
+    image: mediasoup-audio-ingest:local
+    container_name: mediasoup-audio
+    restart: unless-stopped
+    environment:
+      PORT: "3000"
+      RTP_PORT: "40000"
+      RECORD_DIR: "/recordings"
+      ANNOUNCED_IP: "192.168.1.87"     # <— ключове: що віддати в ICE-кандидатах
+      REC_LOOPBACK_IP: "127.0.0.1"  # <— куди слати RTP для запису всередині контейнера
+      POST_CONVERT_MP3: "true"
+      RECORD_BITRATE: "160k"
+      KEEP_OGG: "true"
+    ports:
+      #- "3000:3000/tcp"
+      - "40000:40000/udp"
+      - "40000:40000/tcp"
+    volumes:
+      - ./recordings:/recordings
+  caddy:
+    image: caddy:2
+    container_name: caddy
+    restart: unless-stopped
+    depends_on:
+      - mediasoup
+    ports:
+      - "443:443/tcp"
+      - "80:80/tcp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
